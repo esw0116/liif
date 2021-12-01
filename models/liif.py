@@ -74,14 +74,17 @@ class LIIF(nn.Module):
                     feat, coord_.flip(-1).unsqueeze(1),
                     mode='nearest', align_corners=False)[:, :, 0, :] \
                     .permute(0, 2, 1)
+                print(feat.shape, coord_.shape, q_feat.shape)
                 q_coord = F.grid_sample(
                     feat_coord, coord_.flip(-1).unsqueeze(1),
                     mode='nearest', align_corners=False)[:, :, 0, :] \
                     .permute(0, 2, 1)
+                print(q_feat.shape, q_coord.shape)
                 rel_coord = coord - q_coord
                 rel_coord[:, :, 0] *= feat.shape[-2]
                 rel_coord[:, :, 1] *= feat.shape[-1]
                 inp = torch.cat([q_feat, rel_coord], dim=-1)
+                print(inp.shape)
 
                 if self.cell_decode:
                     rel_cell = cell.clone()
@@ -92,6 +95,7 @@ class LIIF(nn.Module):
                 bs, q = coord.shape[:2]
                 pred = self.imnet(inp.view(bs * q, -1)).view(bs, q, -1)
                 preds.append(pred)
+                input()
 
                 area = torch.abs(rel_coord[:, :, 0] * rel_coord[:, :, 1])
                 areas.append(area + 1e-9)

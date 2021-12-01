@@ -9,6 +9,7 @@ class MLP(nn.Module):
     def __init__(self, in_dim, out_dim, hidden_list):
         super().__init__()
         layers = []
+        print(in_dim)
         lastv = in_dim
         for hidden in hidden_list:
             layers.append(nn.Linear(lastv, hidden))
@@ -18,6 +19,7 @@ class MLP(nn.Module):
         self.layers = nn.Sequential(*layers)
 
     def forward(self, x):
+        print(x.shape, x.view(-1, x.shape[-1]).shape)
         shape = x.shape[:-1]
         x = self.layers(x.view(-1, x.shape[-1]))
         return x.view(*shape, -1)
