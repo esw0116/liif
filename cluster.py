@@ -52,9 +52,9 @@ def batched_index_select(values, indices):
 
 
 class Cluster(nn.Module):
-    def __init__(self, encoder_spec, save_folder, hash_buckets=8, n_hashes=4, window_size=32):
+    def __init__(self, encoder_spec, model, hash_buckets=8, n_hashes=4, window_size=32):
         super().__init__()
-        self.save_folder = save_folder
+        self.model = model
         self.hash_buckets = hash_buckets
         self.n_hashes = n_hashes
         self.window_size = window_size
@@ -85,21 +85,17 @@ class Cluster(nn.Module):
         
         #get hash codes
         hash_codes = torch.argmax(rotated_vecs, dim=-1) #[N,n_hashes,H*W]
-        
-        #add offsets to avoid hash codes overlapping between hash rounds 
-        # offsets = torch.arange(self.n_hashes, device=device) 
-        # offsets = torch.reshape(offsets * hash_buckets, (1, -1, 1))
-        # hash_codes = torch.reshape(hash_codes + offsets, (N, -1,)) #[N,n_hashes*H*W]
-
         return hash_codes
 
     def forward(self, inp):
-        # self.gen_feat(inp)
-        # h,w = self.feat.shape[-2:]
-        # feat_window = window_partition(self.feat, self.window_size)
-        
-        h,w = inp.shape[-2:]
-        feat_window = window_partition(inp, self.window_size)
+        if self.model == 'none':
+            h,w = inp.shape[-2:]~
+            feat_window = window_partition(inp, self.window_size)
+
+        else:
+            self.gen_feat(inp)
+            h,w = self.feat.shape[-2:]
+            feat_window = window_partition(self.feat, self.window_size)
         
         N,_,H,W = feat_window.shape
         x_embed = feat_window.view(N,-1,H*W).contiguous().permute(0,2,1)
@@ -108,7 +104,7 @@ class Cluster(nn.Module):
         hash_window = self.LSH(self.hash_buckets, x_embed).detach() #[N,n_hashes, H*W]
         hash_window = hash_window.reshape(N, -1, H, W)
         hash_feature = window_reverse(hash_window, self.window_size, h, w).permute(0,2,3,1).cpu().numpy()
-
+        
         #Color coding
         hash_image_R = np.vectorize(self.color_code_R.get)(hash_feature).astype('uint8')
         hash_image_G = np.vectorize(self.color_code_G.get)(hash_feature).astype('uint8')
@@ -121,8 +117,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--input_folder', default='dataset/DIV2K/DIV2K_valid_LR_bicubic')
     parser.add_argument('--hr_folder', default='dataset/DIV2K/DIV2K_valid_HR')
+    parser.add_argument('--model', type=str, choices=['edsr', 'none'], help='super-resolution model')
     parser.add_argument('--scale', type=int, default=2)
-    parser.add_argument('--save_folder')
+    parser.add_argument('--n_buckets', type=int, default=8, help='Number of groups')
+    parser.add_argument('--n_rounds', type=int, default=4, help='Number of clustering iterations')
+    parser.add_argument('--window_size', type=int, default=32, help='Window size')
+    parser.add_argument('--save_folder', default='output')
     args = parser.parse_args()
 
     encoder_spec = {'name': 'edsr-baseline', 'args': {'scale': args.scale}}
