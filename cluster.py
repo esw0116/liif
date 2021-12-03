@@ -18,31 +18,30 @@ import utils
 def window_partition(x, window_size):
     """
     Args:
-        x: (B, C, H, W)
+        x: (B, H, W, C)
         window_size (int): window size
     Returns:
-        windows: (num_windows*B, C, window_size, window_size)
+        windows: (num_windows*B, window_size, window_size, C)
     """
-    B, C, H, W = x.shape
-    x = x.view(B, C, H // window_size, window_size, W // window_size, window_size)
-    windows = x.permute(0, 1, 2, 4, 3, 5).contiguous().view(-1, C, window_size, window_size)
-
+    B, H, W, C = x.shape
+    x = x.view(B, H // window_size, window_size, W // window_size, window_size, C)
+    windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, C)
     return windows
 
 
 def window_reverse(windows, window_size, H, W):
     """
     Args:
-        windows: (num_windows*B, C, window_size, window_size)
+        windows: (num_windows*B, window_size, window_size, C)
         window_size (int): Window size
         H (int): Height of image
         W (int): Width of image
     Returns:
-        x: (B, C, H, W)
+        x: (B, H, W, C)
     """
     B = int(windows.shape[0] / (H * W / window_size / window_size))
-    x = windows.view(B, -1, H // window_size, W // window_size, window_size, window_size)
-    x = x.permute(0, 1, 2, 4, 3, 5).contiguous().view(B, -1, H, W)
+    x = windows.view(B, H // window_size, W // window_size, window_size, window_size, -1)
+    x = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, H, W, -1)
     return x
 
 
@@ -89,22 +88,28 @@ class Cluster(nn.Module):
 
     def forward(self, inp):
         if self.model == 'none':
-            h,w = inp.shape[-2:]~
+            h,w = inp.shape[-2:]
+            inp = inp.permute(0,2,3,1) # B H W C
             feat_window = window_partition(inp, self.window_size)
 
         else:
             self.gen_feat(inp)
             h,w = self.feat.shape[-2:]
+            self.feat = self.feat.permute(0,2,3,1) # B H W C
             feat_window = window_partition(self.feat, self.window_size)
         
-        N,_,H,W = feat_window.shape
-        x_embed = feat_window.view(N,-1,H*W).contiguous().permute(0,2,1)
+        # print(feat_window.shape)
+        
+        N,H,W,_ = feat_window.shape
+        x_embed = feat_window.view(N,H*W,-1).contiguous()
         
         #get assigned hash codes/bucket number         
         hash_window = self.LSH(self.hash_buckets, x_embed).detach() #[N,n_hashes, H*W]
-        hash_window = hash_window.reshape(N, -1, H, W)
-        hash_feature = window_reverse(hash_window, self.window_size, h, w).permute(0,2,3,1).cpu().numpy()
-        
+        hash_window = hash_window.reshape(N, -1, H, W).permute(0,2,3,1) # N ws ws C
+        # print(hash_window.shape)
+        hash_feature = window_reverse(hash_window, self.window_size, h, w).cpu().numpy()
+        # print(hash_feature.shape)
+        # input()
         #Color coding
         hash_image_R = np.vectorize(self.color_code_R.get)(hash_feature).astype('uint8')
         hash_image_G = np.vectorize(self.color_code_G.get)(hash_feature).astype('uint8')
@@ -125,8 +130,8 @@ if __name__ == '__main__':
     parser.add_argument('--save_folder', default='output')
     args = parser.parse_args()
 
-    encoder_spec = {'name': 'edsr-baseline', 'args': {'scale': args.scale}}
-    model = Cluster(encoder_spec=encoder_spec, save_folder=args.save_folder)
+    encoder_spec = {'name': 'edsr-baseline', 'args': {'no_upsampling': True, 'scale': args.scale}}
+    model = Cluster(encoder_spec=encoder_spec, model=args.model, hash_buckets=args.n_buckets, n_hashes=args.n_rounds, window_size=args.window_size)
 
     for path, hr_path in zip(sorted(glob.glob(os.path.join(args.input_folder, 'X{}'.format(args.scale), '*'))), sorted(glob.glob(os.path.join(args.hr_folder, '*')))):
         # read image
